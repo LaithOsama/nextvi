@@ -433,3 +433,4 @@ extern rset *fsincl;
 extern char *fs_exdir;
 extern int vi_hidch;
 extern int vi_insmov;
+extern int stdin_fd;
