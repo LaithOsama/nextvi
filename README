@@ -4,8 +4,7 @@ Nextvi is a vi/ex editor. It can edit bidirectional UTF-8 text.
 
 NOTICE
 ======
-As of 2022-01-01 Nextvi development has been driven to completion.
-No new features are being added, old ones polish and improve.
+Master branch includes only the core feature set. See PATCHES section.
 Be sure to read Q1 in the FAQ section of this file before doing anything else.
 
 NAME
@@ -80,8 +79,13 @@ NEXTVI FEATURES & CHANGES
 ^w may also take vi_arg1 or motions as a region.
 2. Added key to change the join mode of J key. keybind: vj
 Mode 1 (default) adds a space padding. Mode 0: raw line join.
-3. Added linenumbers, keybind: # (relative numbers are placed after indent)
-Passing vi_arg1 to # enables permanent line numbers.
+3. Added linenumbers, keybind: #
+There are 4 modes (a toggle and controlled by vi_arg1):
+	# - single shot print, shows global and relative numbers.
+	2# - permanent. shows global numbers.
+	4# - permanent. shows relative numbers after indentation.
+	8# - permanent. shows relative numbers.
+Line number colors are customizeable in conf.c under "/##" ft.
 4. Added invisible character view, keybind: V
 5. Added regex for changing spaces to tabs and vice versa, (controlled by vi_arg1)
 keybind: vi, vI
@@ -231,6 +235,7 @@ Running "inc" without an arg will disable all filters.
  - Added key that opens the file based on text from the cursor.
    keybind: ^i or TAB
 34. Added key to save current file keybind: ^k
+If there was a soft error writing to the file, hit ^k again to force write.
 35. The new special character "/" for ft in conf.c now signifies that the
 regex will be applied on any file. "/" is forbidden filename character on
 unix, the filetype that includes "/" is for internal use.
@@ -395,6 +400,12 @@ or (specified range)
 Additionally, :f supports xoff (horizontal offset). This is essential for
 scripting macros. Subsequent commands within the range will move to the
 next match just like n/N.
+74. Added a new ex option "mpt". When set to 0 after an ex command is called
+from vi, disables the "[any key to continue]" prompt. This is needed because
+nextvi no longer swallows print messages and will print everything instead
+of just last one.
+75. Added commandline option -m to disable the initial file read message
+because :se noled can't.
 
 LESSER KNOWN FEATURES
 ---------------------
@@ -468,6 +479,17 @@ At the zenith of your vi/nextvi education you'll find that EXINIT can be
 used to achieve arbitrary level of customization. Using new ex command "tp"
 any sequence of vi/ex commands can be performed at startup. This is where
 real "groking vi" starts.
+
+To run examples below:
+There are invisible/non printing characters inside the EXINIT string. Visual
+copy paste in most programs will not copy it correctly. Copy it into a file and
+execute like this:
+	$ source ./init.sh
+The new line inside the EXINIT string is literal and is represented with "\n".
+To suppress EXINIT invoke vi like so: EXINIT= vi file
+When scripting for improved performance, output can be disabled by running :se noled
+and the initial load message can be suppressed using -m commandline.
+
 Example 1:
 There is a dictionary file (assume vi.c), which we always want to have indexed
 at startup for autocomplete feature in 31.
@@ -478,24 +500,15 @@ Example 2:
 Load your shell's history into vi's history buffer and adjust the data such
 that it is usable by appending ! at the beginning of command and escaping the "|"
 pipes the way ex prompt expects them (see 61.)
-export EXINIT="e /root/.ash_history|tp yG:p:%s/^/\!\\|%s/ \| / \\\\\\| /g
-qq|bx 1|bx|ft"
+export EXINIT=$'e /root/.ash_history|tp yG:p:%s/^/\!\\|%s/ \| / \\\\\\| /g\nqq|bx 1|bx|ft'
 Congratulations, vi has unofficially replaced your shell's frontend.
 Example 3:
 Setup some custom @@ macros in your favorite registers.
-export EXINIT="e|tp io{
-}kA|tp 1G|tp 2\"ayy"
+export EXINIT=$'e|tp io{\n}kA|tp 1G|tp 2\"ayy'
 This macro gets loaded into register a, when @a is executed the macro will
 create { and closing } below the cursor leaving cursor in insert mode in
 between the braces. This is something you would commonly do in C like
 programming language.
- - CRITICAL - the new line inside the EXINIT string is literal, it's best to
-   store the export command in a .sh file and set it using:
-   $ . ./init.sh
-   Otherwise this examples 2 and 3 may not work!!!
-To suppress EXINIT invoke vi like so: EXINIT= vi file
-When scripting for improved performance, output can be disabled by running :se noled
-and the initial load message can be suppressed using redirection like so: vi > /dev/null
 
 - Uppercase registers
 In vi uppercase registers append to the lowercase register instead of

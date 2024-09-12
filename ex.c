@@ -29,7 +29,7 @@ static struct buf *ex_tpbuf;	/* temp prev buffer */
 sbuf *xacreg;			/* autocomplete db filter regex */
 rset *xkwdrs;			/* the last searched keyword rset */
 int xkwddir;			/* the last search direction */
-int ex_printed;			/* ex_print() calls since the last command */
+int xmpt;			/* whether to prompt after printing > 1 lines in vi */
 static int xbufsmax;		/* number of buffers */
 static int xbufsalloc = 10;	/* initial number of buffers */
 static char xrep[EXLEN];	/* the last replacement */
@@ -414,7 +414,8 @@ static int ec_edit(char *loc, char *cmd, char *arg)
 	snprintf(msg, sizeof(msg), "\"%s\" %dL [%c]",
 			*ex_path ? ex_path : "unnamed", lbuf_len(xb),
 			fd < 0 || rd ? 'f' : 'r');
-	ex_print(msg);
+	if (!(xvis & 8))
+		ex_print(msg);
 	return fd < 0 || rd;
 }
 
@@ -444,7 +445,7 @@ static int ec_editapprox(char *loc, char *cmd, char *arg)
 		ec_edit(loc, cmd, path);
 		path[lbuf_slen(path)] = '\n';
 	}
-	ex_printed = 0;
+	xmpt = 0;
 	sbuf_free(sb)
 	return 0;
 }
@@ -511,21 +512,22 @@ static int ec_write(char *loc, char *cmd, char *arg)
 	}
 	if (arg[0] == '!') {
 		ibuf = lbuf_cp(xb, beg, end);
-		if (!xvis)
+		if (!(xvis & 4))
 			term_chr('\n');
-		ex_printed = 2;
+		xmpt = 2;
 		cmd_pipe(arg + 1, ibuf, 0);
 		free(ibuf);
 	} else {
 		int fd;
-		if (!strchr(cmd, '!') && !strcmp(ex_path, path) &&
-				mtime(ex_path) > ex_buf->mtime) {
-			ex_print("write failed: file changed");
-			return 1;
-		}
-		if (!strchr(cmd, '!') && arg[0] && mtime(arg) >= 0) {
-			ex_print("write failed: file exists");
-			return 1;
+		if (!strchr(cmd, '!')) {
+			if (!strcmp(ex_path, path) && mtime(path) > ex_buf->mtime) {
+				ex_print("write failed: file changed");
+				return 1;
+			}
+			if (arg[0] && mtime(path) >= 0) {
+				ex_print("write failed: file exists");
+				return 1;
+			}
 		}
 		fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, conf_mode());
 		if (fd < 0) {
@@ -757,9 +759,9 @@ static int ec_exec(char *loc, char *cmd, char *arg)
 	char *text, *rep;
 	if (!loc[0]) {
 		int ret;
-		if (!xvis)
+		if (!(xvis & 4))
 			term_chr('\n');
-		ex_printed = 2;
+		xmpt = 2;
 		ret = cmd_exec(arg);
 		return ret;
 	}
@@ -851,6 +853,7 @@ static struct option {
 	{"grp", &xgrp},
 	{"pac", &xpac},
 	{"led", &xled},
+	{"mpt", &xmpt},
 };
 
 static char *cutword(char *s, char *d)
@@ -1127,6 +1130,8 @@ void ex_init(char **files, int n)
 		ec_edit("", "e", s);
 		s = *(++files);
 	} while (--n > 0);
+	xmpt = 0;
+	xvis &= ~8;
 	if ((s = getenv("EXINIT")))
 		ex_command(s)
 }
