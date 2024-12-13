@@ -41,14 +41,16 @@ CFLAGS="\
 -Wno-unused-parameter \
 -Wno-unused-result \
 -Wfatal-errors -std=c99 \
--D_POSIX_C_SOURCE=200809L $CFLAGS"
+ $CFLAGS"
 
 : "${CC:=cc}"
 : "${PREFIX:=/usr/local}"
 : "${OS:=$(uname)}"
 case "$OS" in
-*BSD*) CFLAGS="$CFLAGS -D_BSD_SOURCE" ;;
-*Darwin*) CFLAGS="$CFLAGS -D_DARWIN_C_SOURCE" ;;
+*_NT*) CFLAGS="$CFLAGS -D_POSIX_C_SOURCE=200809L" ;;
+*Darwin*) CFLAGS="$CFLAGS -D_POSIX_C_SOURCE=200809L -D_DARWIN_C_SOURCE" ;;
+*Linux*) CFLAGS="$CFLAGS -D_POSIX_C_SOURCE=200809L" ;;
+*) CFLAGS="$CFLAGS -D_DEFAULT_SOURCE" ;;
 esac
 
 : "${OPTFLAGS:=-O2}"
@@ -62,6 +64,7 @@ build() {
 }
 
 install() {
+    run rm "$DESTDIR$PREFIX/bin/vi" 2> /dev/null
     run mkdir -p "$DESTDIR$PREFIX/bin/" &&
     run cp -f vi "$DESTDIR$PREFIX/bin/vi" &&
     [ -x "$DESTDIR$PREFIX/bin/vi" ] && log "$G" "\"${BASE##*/}\" has been installed to $DESTDIR$PREFIX/bin/vi" || log "$R" "Couldn't finish installation"
@@ -81,7 +84,7 @@ while [ $# -gt 0 ] || [ "$1" = "" ]; do
         set -- build "$@"
         ;;
     "" | "build")
-        # If the user doesn't use "build" explicitely, do not run the build step again.
+        # If the user doesn't use "build" explicitly, do not run the build step again.
         if [ "$1" = "build" ]; then
             explicit="1"
         else
@@ -136,8 +139,21 @@ while [ $# -gt 0 ] || [ "$1" = "" ]; do
         fi
         readlink -f ./nextvi && exit 0
         ;;
+    "fetch")
+        shift
+        ! git diff --quiet HEAD && {
+          log "$R" "Please stash changes before fetching."
+          exit 1
+        }
+        git switch -c upstream-temp
+        git pull https://github.com/kyx0r/nextvi
+        git switch master
+        git rebase --rebase-merges upstream-temp
+        git branch -D upstream-temp
+        log "$G" "Successfully fetched from upstream."
+        ;;
     *)
-        echo "Usage: $0 {install|pgobuild|build|debug|clean}"
+        echo "Usage: $0 {install|pgobuild|build|debug|fetch|clean}"
         exit 1
         ;;
     esac

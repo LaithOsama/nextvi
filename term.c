@@ -5,7 +5,7 @@ static struct termios termios;
 
 void term_init(void)
 {
-	if (xvis & 2 && xvis & 4)
+	if (xvis & 2)
 		return;
 	struct winsize win;
 	struct termios newtermios;
@@ -24,12 +24,11 @@ void term_init(void)
 	}
 	xcols = xcols ? xcols : 80;
 	xrows = xrows ? xrows : 25;
-	term_out("\33[m");
 }
 
 void term_done(void)
 {
-	if (!term_sbuf)
+	if (xvis & 2)
 		return;
 	term_commit();
 	sbuf_free(term_sbuf)
@@ -56,7 +55,7 @@ void term_commit(void)
 	term_record = 0;
 }
 
-void term_out(char *s)
+static void term_out(char *s)
 {
 	if (term_record)
 		sbufn_str(term_sbuf, s)
@@ -89,40 +88,47 @@ void term_room(int n)
 void term_pos(int r, int c)
 {
 	char buf[64] = "\r\33[", *s;
-	if (c < 0)
-		c = 0;
-	else if (c >= xcols)
-		c = xcols - 1;
 	if (r < 0) {
-		memcpy(itoa(abs(c), buf+3), c > 0 ? "C" : "D", 2);
+		memcpy(itoa(MAX(0, c), buf+3), c > 0 ? "C" : "D", 2);
 		term_out(buf);
 	} else {
 		s = itoa(r + 1, buf+3);
-		*s++ = ';';
-		memcpy(itoa(c + 1, s), "H", 2);
+		if (c > 0) {
+			*s++ = ';';
+			s = itoa(c + 1, s);
+		}
+		memcpy(s, "H", 2);
 		term_out(buf+1);
 	}
 }
 
-static char ibuf[4096];			/* input character buffer */
-static char icmd[4096];			/* read after the last term_cmd() */
+static unsigned char ibuf[4096];	/* input character buffer */
 unsigned int ibuf_pos, ibuf_cnt;	/* ibuf[] position and length */
+unsigned char icmd[4096];		/* read after the last term_cmd() */
 unsigned int icmd_pos;			/* icmd[] position */
+unsigned int tibuf_pos, texec, tn;
 
 /* read s before reading from the terminal */
 void term_push(char *s, unsigned int n)
 {
 	n = MIN(n, sizeof(ibuf) - ibuf_cnt);
-	memcpy(ibuf + ibuf_cnt, s, n);
+	if (texec) {
+		if (tibuf_pos != ibuf_pos)
+			tn = 0;
+		memmove(ibuf + ibuf_pos + n + tn,
+			ibuf + ibuf_pos + tn, ibuf_cnt - ibuf_pos - tn);
+		memcpy(ibuf + ibuf_pos + tn, s, n);
+		tn += n;
+		tibuf_pos = ibuf_pos;
+	} else
+		memcpy(ibuf + ibuf_cnt, s, n);
 	ibuf_cnt += n;
 }
 
-/* return a static buffer containing inputs read since the last term_cmd() */
-char *term_cmd(int *n)
+void term_back(int c)
 {
-	*n = icmd_pos;
-	icmd_pos = 0;
-	return icmd;
+	char s[1] = {c};
+	term_push(s, 1);
 }
 
 int term_read(void)
@@ -130,21 +136,27 @@ int term_read(void)
 	struct pollfd ufds[1];
 	int n;
 	if (ibuf_pos >= ibuf_cnt) {
+		if (texec) {
+			xquit = 1;
+			if (texec == '&')
+				goto ret;
+		}
 		ufds[0].fd = STDIN_FILENO;
 		ufds[0].events = POLLIN;
-		if (poll(ufds, 1, -1) <= 0)
-			return -1;
 		/* read a single input character */
-		if ((n = read(STDIN_FILENO, ibuf, 1)) <= 0) {
+		if (poll(ufds, 1, -1) <= 0 ||
+				(n = read(STDIN_FILENO, ibuf, 1)) <= 0) {
 			xquit = !isatty(STDIN_FILENO);
-			return -1;
+			ret:
+			*ibuf = 0;
+			n = 1;
 		}
 		ibuf_cnt = n;
 		ibuf_pos = 0;
 	}
-	if (icmd_pos < sizeof(icmd))
-		icmd[icmd_pos++] = (unsigned char)ibuf[ibuf_pos];
-	return (unsigned char)ibuf[ibuf_pos++];
+	icmd_pos = icmd_pos % sizeof(icmd);
+	icmd[icmd_pos++] = ibuf[ibuf_pos];
+	return ibuf[ibuf_pos++];
 }
 
 /* return a static string that changes text attributes to att */
@@ -184,8 +196,8 @@ char *term_att(int att)
 static int cmd_make(char **argv, int *ifd, int *ofd)
 {
 	int pid;
-	int pipefds0[2];
-	int pipefds1[2];
+	int pipefds0[2] = {-1, -1};
+	int pipefds1[2] = {-1, -1};
 	if (ifd)
 		pipe(pipefds0);
 	if (ofd)
@@ -244,7 +256,6 @@ char *cmd_pipe(char *cmd, char *ibuf, int oproc)
 {
 	static char *sh[] = {"$SHELL", "sh", NULL};
 	struct pollfd fds[3];
-	sbuf *sb = NULL; /* initialize, bogus gcc12 warn */
 	char buf[512];
 	int ifd = -1, ofd = -1;
 	int slen = ibuf ? strlen(ibuf) : 0;
@@ -258,13 +269,12 @@ char *cmd_pipe(char *cmd, char *ibuf, int oproc)
 	int pid = cmd_make(argv+!xish, ibuf ? &ifd : NULL, oproc ? &ofd : NULL);
 	if (pid <= 0)
 		return NULL;
-	if (oproc)
-		sbuf_make(sb, 64)
+	sbuf_smake(sb, sizeof(buf))
 	if (!ibuf) {
 		signal(SIGINT, SIG_IGN);
 		term_done();
-	}
-	fcntl(ifd, F_SETFL, fcntl(ifd, F_GETFL, 0) | O_NONBLOCK);
+	} else if (ifd >= 0)
+		fcntl(ifd, F_SETFL, fcntl(ifd, F_GETFL, 0) | O_NONBLOCK);
 	fds[0].fd = ofd;
 	fds[0].events = POLLIN;
 	fds[1].fd = ifd;
@@ -319,12 +329,7 @@ char *cmd_pipe(char *cmd, char *ibuf, int oproc)
 		signal(SIGINT, SIG_DFL);
 	}
 	if (oproc)
-		sbufn_done(sb)
+		sbufn_sret(sb)
+	free(sb->s);
 	return NULL;
-}
-
-int cmd_exec(char *cmd)
-{
-	cmd_pipe(cmd, NULL, 0);
-	return 0;
 }

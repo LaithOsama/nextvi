@@ -30,25 +30,19 @@ int uc_slen(char *s)
 /* find the beginning of the character at s[i] */
 char *uc_beg(char *beg, char *s)
 {
-	while (s > beg && (((unsigned char) *s) & 0xc0) == 0x80)
-		s--;
+	if (utf8_length[0xc0] == 1)
+		return s;
+	for (; s > beg && ((unsigned char)*s & 0xc0) == 0x80; s--);
 	return s;
 }
 
-/* return a pointer to the character preceding s */
-char *uc_prev(char *beg, char *s)
-{
-	return s == beg ? beg : uc_beg(beg, s - 1);
-}
-
 /* allocate and return an array for the characters in s */
-char **uc_chop(char *s, int *n)
+char **uc_chop(char *s, unsigned int *n)
 {
-	char **chrs;
-	int i;
 	*n = uc_slen(s);
-	chrs = emalloc((*n + 1) * sizeof(chrs[0]));
-	for (i = 0; i < *n + 1; i++) {
+	int i, c = *n + 1;
+	char **chrs = emalloc(c * sizeof(chrs[0]));
+	for (i = 0; i < c; i++) {
 		chrs[i] = s;
 		s += uc_len(s);
 	}
@@ -99,7 +93,7 @@ char *uc_dup(const char *s)
 int uc_isspace(char *s)
 {
 	int c = s ? (unsigned char) *s : 0;
-	return c <= 0x7f && isspace(c);
+	return c < 0x7f && isspace(c);
 }
 
 int uc_isprint(char *s)
@@ -117,7 +111,7 @@ int uc_isalpha(char *s)
 int uc_isdigit(char *s)
 {
 	int c = s ? (unsigned char) *s : 0;
-	return c <= 0x7f && isdigit(c);
+	return c < 0x7f && isdigit(c);
 }
 
 int uc_kind(char *c)
@@ -280,31 +274,32 @@ static void uc_cput(char *d, int c)
 }
 
 /* shape the given arabic character; returns a static buffer */
-char *uc_shape(char *beg, char *s)
+char *uc_shape(char *beg, char *s, int c)
 {
 	static char out[16];
 	char *r;
-	int tmp, curr, prev = 0, next = 0;
-	uc_code(curr, s)
-	if (!curr || !UC_R2L(curr))
+	int tmp, l, prev = 0, next = 0;
+	if (!c || !UC_R2L(c))
 		return NULL;
 	r = s;
 	while (r > beg) {
-		r = uc_beg(beg, r - 1); uc_code(tmp, r)
+		r = uc_beg(beg, r - 1);
+		uc_code(tmp, r, l)
 		if (!uc_acomb(tmp)) {
-			uc_code(prev, r)
+			uc_code(prev, r, l)
 			break;
 		}
 	}
 	r = s;
 	while (uc_len(r)) {
-		r += uc_len(r); uc_code(tmp, r)
+		r += uc_len(r);
+		uc_code(tmp, r, l)
 		if (!uc_acomb(tmp)) {
-			uc_code(next, r)
+			uc_code(next, r, l)
 			break;
 		}
 	}
-	uc_cput(out, uc_cshape(curr, prev, next));
+	uc_cput(out, uc_cshape(c, prev, next));
 	return out;
 }
 
@@ -475,6 +470,8 @@ static int zwchars[][2] = {
 	{0x1E2AE, 0x1E2AE}, {0x1E2EC, 0x1E2EF}, {0x1E4EC, 0x1E4EF}, {0x1E8D0, 0x1E8D6},
 	{0x1E944, 0x1E94A}, {0xE0001, 0xE0001}, {0xE0020, 0xE007F},
 };
+int zwlen = LEN(zwchars);
+int def_zwlen = LEN(zwchars);
 
 static int bchars[][2] = {
 	{0x00000, 0x0001f}, {0x00080, 0x0009f}, {0x00300, 0x0036f},
@@ -611,10 +608,12 @@ static int bchars[][2] = {
 	{0x1f233, 0x1f23f}, {0x1f24a, 0x1ffff}, {0x2a6d8, 0x2a6ff},
 	{0x2b736, 0x2f7ff}, {0x2fa1f, 0x10ffff},
 };
+int bclen = LEN(bchars);
+int def_bclen = LEN(bchars);
 
 static int find(int c, int tab[][2], int n)
 {
-	if (c < tab[0][0])
+	if (c < tab[0][0] || !n)
 		return 0;
 	int m, l = 0;
 	int h = n - 1;
@@ -636,18 +635,10 @@ static int uc_isdw(int c)
 	return find(c, dwchars, LEN(dwchars));
 }
 
-/* zero-width and combining characters */
-static int uc_iszw(int c)
-{
-	return find(c, zwchars, LEN(zwchars));
-}
-
-/* nonprintable characters */
+/* (nonprintable) zero width & combining characters */
 int uc_isbell(int c)
 {
-	if (c == ' ' || c == '\t' || c == '\n' || (c <= 0x7f && isprint(c)))
-		return 0;
-	return uc_iszw(c) || find(c, bchars, LEN(bchars));
+	return find(c, zwchars, zwlen) || find(c, bchars, bclen);
 }
 
 /* printing width */
@@ -655,5 +646,5 @@ int uc_wid(int c)
 {
 	if (uc_isdw(c))
 		return 2;
-	return 1; /* treat zw as 1 */
+	return zwlen || !find(c, zwchars, def_zwlen);
 }
