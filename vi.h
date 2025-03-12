@@ -284,9 +284,9 @@ char *uc_shape(char *beg, char *s, int c);
 extern sbuf *term_sbuf;
 extern int term_record;
 extern int xrows, xcols;
-extern unsigned int tibuf_pos, texec, tn;
-extern unsigned int ibuf_pos, ibuf_cnt, icmd_pos;
-extern unsigned char icmd[4096];
+extern unsigned int ibuf_pos, ibuf_cnt, ibuf_sz, icmd_pos;
+extern unsigned char *ibuf, icmd[4096];
+extern unsigned int texec, tn;
 #define term_write(s, n) if (xled) write(1, s, n);
 void term_init(void);
 void term_done(void);
@@ -454,8 +454,8 @@ struct placeholder {
 	int wid;	/* the width of the placeholder */
 	int l;		/* the length of the codepoint */
 };
-extern struct placeholder placeholders[];
-extern const int def_phlen;
+extern struct placeholder _ph[];
+extern struct placeholder *ph;
 extern int phlen;
 extern int conf_hlrev;
 char **conf_kmap(int id);
